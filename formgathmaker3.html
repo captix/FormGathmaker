@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Form Gath generator</title>
+    <style>
+        body {
+            font-family: -apple-system, system-ui, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background-color: #f4f4f5;
+            padding: 2rem;
+            margin: 0;
+            display: flex;
+            justify-content: center;
+        }
+        .container {
+            width: 100%;
+            max-width: 900px;
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+        }
+        h1 {
+            text-align: center;
+            color: #18181b;
+            margin-bottom: 0.5rem;
+        }
+        .box-wrapper {
+            background: white;
+            padding: 1.5rem;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+            display: flex;
+            flex-direction: column;
+        }
+        label {
+            font-weight: 700;
+            color: #3f3f46;
+            margin-bottom: 0.75rem;
+            display: block;
+        }
+        textarea {
+            width: 100%;
+            height: 200px;
+            padding: 1rem;
+            border: 1px solid #d4d4d8;
+            border-radius: 6px;
+            font-family: monospace;
+            font-size: 13px;
+            resize: vertical;
+            box-sizing: border-box;
+        }
+        textarea:focus {
+            outline: none;
+            border-color: #2563eb;
+            ring: 2px solid #2563eb;
+        }
+        
+        #outputTsv {
+            background-color: #fafafa;
+            color: #52525b;
+            white-space: pre; /* Ensures tabs/newlines render correctly */
+            overflow-x: auto;
+        }
+
+        .header-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 0.75rem;
+        }
+        
+        button#copyBtn {
+            background-color: #2563eb;
+            color: white;
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 6px;
+            font-weight: 600;
+            cursor: pointer;
+            font-size: 0.9rem;
+            transition: all 0.2s;
+        }
+        button#copyBtn:hover { background-color: #1d4ed8; }
+        button#copyBtn.copied {
+            background-color: #16a34a;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h1>Form Gath generator</h1>
+        
+        <div class="box-wrapper">
+            <label for="inputJson">1. Paste JSON Schema here:</label>
+            <textarea id="inputJson" placeholder='Paste your JSON here to automatically convert...'></textarea>
+        </div>
+
+        <div class="box-wrapper">
+            <div class="header-row">
+                <label for="outputTsv" style="margin:0">2. TSV Output (Ready for Excel/Sheets):</label>
+                <button id="copyBtn" onclick="copyToClipboard()">Copy to Clipboard</button>
+            </div>
+            <textarea id="outputTsv" readonly placeholder="Result will appear here automatically..."></textarea>
+        </div>
+    </div>
+
+<script>
+    const inputArea = document.getElementById('inputJson');
+    const outputArea = document.getElementById('outputTsv');
+    const copyBtn = document.getElementById('copyBtn');
+
+    // Listen for any input (paste, typing)
+    inputArea.addEventListener('input', convertJsonToTsv);
+
+    function convertJsonToTsv() {
+        const inputStr = inputArea.value;
+
+        // Reset output if empty
+        if (!inputStr.trim()) {
+            outputArea.value = "";
+            return;
+        }
+
+        try {
+            const data = JSON.parse(inputStr);
+            
+            if (!data.fields || !Array.isArray(data.fields)) {
+                outputArea.value = "Error: Valid JSON, but missing 'fields' array.";
+                return;
+            }
+
+            const fields = data.fields;
+            
+            // 1. Prepare Columns Data
+            // Start with the custom Employee_number column
+            const columns = [
+                {
+                    name: 'Employee_number',
+                    type: 'string', 
+                    values: [] // Always empty
+                }
+            ];
+
+            // Map the rest of the fields from JSON
+            const mappedFields = fields.map(field => {
+                let values = [];
+
+                if (field.input === 'dropdown' || field.input === 'multi-choice') {
+                    if (field.options && Array.isArray(field.options)) {
+                        values = field.options.map(opt => opt.value);
+                    }
+                } else if (['yes_no', 'confirmation'].includes(field.input) || field.type === 'boolean') {
+                    values = ['yes', 'no'];
+                }
+
+                return {
+                    name: field.name,
+                    type: field.type,
+                    values: values
+                };
+            });
+
+            // Combine them
+            columns.push(...mappedFields);
+
+            // 2. Determine max rows needed (based on the deepest dropdown)
+            let maxOptionDepth = 0;
+            columns.forEach(col => {
+                if (col.values.length > maxOptionDepth) {
+                    maxOptionDepth = col.values.length;
+                }
+            });
+
+            // 3. Build TSV Rows
+            let tsvRows = [];
+
+            // Header 1: Field Names
+            tsvRows.push(columns.map(c => c.name).join('\t'));
+
+            // Header 2: Field Types
+            tsvRows.push(columns.map(c => c.type).join('\t'));
+
+            // Data Rows: Options
+            for (let i = 0; i < maxOptionDepth; i++) {
+                const rowData = columns.map(col => {
+                    // Returns value if it exists, otherwise empty string
+                    return col.values[i] !== undefined ? col.values[i] : "";
+                });
+                tsvRows.push(rowData.join('\t'));
+            }
+
+            outputArea.value = tsvRows.join('\n');
+            
+            resetCopyButton();
+
+        } catch (e) {
+            // Silent fail while typing invalid JSON
+        }
+    }
+
+    function copyToClipboard() {
+        if(!outputArea.value) return;
+
+        outputArea.select();
+        outputArea.setSelectionRange(0, 99999); 
+
+        navigator.clipboard.writeText(outputArea.value).then(() => {
+            copyBtn.textContent = "Copied!";
+            copyBtn.classList.add("copied");
+            
+            setTimeout(() => {
+                resetCopyButton();
+            }, 2000);
+        });
+    }
+
+    function resetCopyButton() {
+        copyBtn.textContent = "Copy to Clipboard";
+        copyBtn.classList.remove("copied");
+    }
+</script>
+
+</body>
+</html>
